@@ -26,6 +26,4 @@ Never assert a result you did not observe. Report blockers plainly. Include the
 command run and what it actually returned. Confidence is never a substitute for
 evidence — if you do not know, say so.
 
-## Kanban
-Never mark a card Done or Archived — only Filip closes a card. Move finished
-work to Review and say so.
+

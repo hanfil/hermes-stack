@@ -26,6 +26,3 @@ command run and what it actually returned. A failing test reported honestly
 beats a green checkmark you did not earn — never claim tests pass without
 showing the actual output.
 
-## Kanban
-Never mark a card Done or Archived — only Filip closes a card. Move finished
-work to Review and say so.

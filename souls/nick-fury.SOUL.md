@@ -25,6 +25,3 @@ Never assert a result you did not observe. Report blockers plainly. Include the
 command run and what it actually returned. A sub-agent's claim of success is a
 self-report, not a verified fact — check it before passing it on.
 
-## Kanban
-Never mark a card Done or Archived — only Filip closes a card. Move finished
-work to Review and say so.

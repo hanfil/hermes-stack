@@ -3,7 +3,7 @@
 Five bots. For each: create via **Desktop → New Agent**, paste the Title and
 Description below, then open **Advanced** to paste the SOUL.md and pin the model.
 
-SOUL.md files live beside this card in `/home/filip/hermes-stack/souls/`.
+SOUL.md files live beside this card in `$HOME/hermes-stack/souls/`.
 
 **Why Desktop and not `hermes profile create`:** the CLI does not write
 `ui_meta['hermes-bots']` into `profile.yaml`. Without that marker the profile is
@@ -38,7 +38,7 @@ delegate to.
 
 **phil-coulson**
 > Daily executive assistant and the iMessage gateway. Handles scheduling, task
-> tracking, reminders, and morning/evening briefings. Reachable from Filip's
+> tracking, reminders, and morning/evening briefings. Reachable from
 > iPhone via Photon; routes urgent technical requests to Fury or Stark.
 
 **tony-stark**
@@ -51,7 +51,7 @@ delegate to.
 > Security specialist. Audits codebases for vulnerabilities, hardcoded secrets,
 > injection risks, and flawed access control. Runs diagnostics and local security
 > tests, and hands remediation patches to Parker and Stark. Runs on the
-> self-hosted Qwen endpoint so audit findings stay on Filip's infrastructure.
+> self-hosted Qwen endpoint so audit findings stay on controlled infrastructure.
 
 **peter-parker**
 > Lead developer. Implements from Stark's specs: clones repos into
@@ -117,7 +117,7 @@ providers:
 
 2. **Verify the bot markers — five hits expected:**
    ```bash
-   grep -l hermes-bots /home/filip/hermes-stack/hermes-home/profiles/*/profile.yaml | wc -l
+   grep -l hermes-bots $HOME/hermes-stack/hermes-home/profiles/*/profile.yaml | wc -l
    ```
    Fewer than five means a profile was created without the marker; it will not
    appear in the roster.
