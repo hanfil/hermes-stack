@@ -1,0 +1,49 @@
+{
+  "acp.agents": {
+    "Hermes — Tony Stark": {
+      "command": "socat",
+      "args": ["-", "UNIX-CONNECT:/acp/tony-stark.sock"],
+      "env": {}
+    },
+    "Hermes — Nick Fury": {
+      "command": "socat",
+      "args": ["-", "UNIX-CONNECT:/acp/nick-fury.sock"],
+      "env": {}
+    },
+    "Hermes — Phil Coulson": {
+      "command": "socat",
+      "args": ["-", "UNIX-CONNECT:/acp/phil-coulson.sock"],
+      "env": {}
+    },
+    "Hermes — Daisy Johnson": {
+      "command": "socat",
+      "args": ["-", "UNIX-CONNECT:/acp/daisy-johnson.sock"],
+      "env": {}
+    },
+    "Hermes — Peter Parker": {
+      "command": "socat",
+      "args": ["-", "UNIX-CONNECT:/acp/peter-parker.sock"],
+      "env": {}
+    }
+  },
+  "acp.autoApprovePermissions": "ask",
+  "acp.logTraffic": true,
+  "gitlens.codeLens.enabled": true,
+  "workbench.colorTheme": "Abyss",
+  "git.autoRepositoryDetection": true,
+  "git.repositoryScanMaxDepth": 1,
+  "git.openRepositoryInParentFolders": "always",
+  "terminal.integrated.defaultProfile.linux": "bash",
+  "workbench.editorAssociations": {
+    "*.md": "vscode.markdown.preview.editor"
+  },
+  "workbench.activityBar.location": "top",
+  "editor.minimap.enabled": false,
+  "workbench.sideBar.location": "right",
+  "workbench.editor.showTabs": "none",
+  "window.commandCenter": false,
+  "window.menuBarVisibility": "compact",
+  "chat.commandCenter.enabled": false,
+  "workbench.editor.editorActionsLocation": "hidden",
+  "workbench.layoutControl.enabled": false
+}

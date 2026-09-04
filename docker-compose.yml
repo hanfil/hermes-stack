@@ -1,0 +1,263 @@
+# Hermes MCU stack. No "version:" key — obsolete in Compose v2+.
+
+services:
+  hermes-mcu-core:
+    # Derived image (Phase 1) — adds node 20 (Photon sidecar),
+    # ffmpeg (MP3->Ogg/Opus), edge_tts. Update with:
+    #   docker compose build --pull && docker compose up -d
+    image: hermes-mcu:local
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: hermes_mcu_core
+    restart: unless-stopped
+    # Chromium's renderer puts shared buffers in /dev/shm. Docker's 64 MB
+    # default is the classic cause of "Chrome crashed / target closed" on any
+    # real page, so give it 1 GB. --disable-dev-shm-usage exists as a fallback
+    # but pushes those buffers onto disk and is slower; sizing it properly is
+    # the better fix.
+    shm_size: 1gb
+    ports:
+      - "127.0.0.1:8787:8787"
+      # Hermes dashboard backend — what Hermes Desktop's "Remote gateway"
+      # connection actually talks to (NOT the WebUI on 8787, and NOT the
+      # OpenAI-compatible api_server on 8642). Bound to loopback: reachable
+      # from this host only, nothing new exposed to the internet. The
+      # Cloudflare tunnel still fronts 8787 only.
+      #
+      # Publishing the port does NOT start the backend. Run it inside the
+      # container (see plan Task 4.0); it must bind 0.0.0.0 there so Docker
+      # can forward, and a non-loopback bind ALWAYS requires an auth provider
+      # (--insecure has been a no-op since the June 2026 hardening).
+      - "127.0.0.1:9119:9119"
+    environment:
+      # Remaps in-image hermeswebui (uid 1024) to host uid 1000
+      # so files in the mounted home stay host-owned.
+      - WANTED_UID=${UID:-1000}
+      - WANTED_GID=${GID:-1000}
+      # REQUIRED. Without the 0.0.0.0 bind the WebUI listens only on the
+      # container's own loopback and cloudflared cannot reach it — the
+      # tunnel comes up green and serves nothing.
+      - HERMES_WEBUI_HOST=0.0.0.0
+      - HERMES_WEBUI_PORT=8787
+      - HERMES_WEBUI_STATE_DIR=/home/hermeswebui/.hermes/webui
+      # REQUIRED: without this the WebUI cannot locate the agent source and
+      # starts with "agent dir: NOT FOUND" — server runs, agent features dead.
+      # api/startup.py:60 probes $HERMES_WEBUI_AGENT_DIR then $HERMES_HOME/hermes-agent.
+      # NOTE: startup.py does NOT know about /opt/hermes (only the init script
+      # does), so pointing at the baked-in source REQUIRES this explicit override.
+      - HERMES_WEBUI_AGENT_DIR=/opt/hermes
+      - HERMES_HOME=/home/hermeswebui/.hermes
+      # llm-wiki reads WIKI_PATH (defaults to $HOME/wiki if unset); the obsidian
+      # skill reads OBSIDIAN_VAULT_PATH. Same directory on purpose — the wiki IS
+      # the vault, and the llm-wiki skill says to point both at one place.
+      # Mounted at /wiki, NOT under /workspace: the wiki is curated, long-lived
+      # knowledge, whereas /workspace is agent scratch. Nesting it inside the
+      # scratch root invites `rm -rf /workspace/*` cleanups to take it too.
+      - WIKI_PATH=/wiki
+      - OBSIDIAN_VAULT_PATH=/wiki
+      # GitHub CLI — ONE shared credential store for all five bots.
+      #
+      # WHY COMPOSE ENV AND NOT A PER-PROFILE .env: each profile gets its own
+      # $HOME (/home/hermeswebui/.hermes/profiles/<name>/home), so gh would
+      # write creds to a different hosts.yml per bot and `gh auth login` would
+      # authenticate exactly ONE of them. Pointing GH_CONFIG_DIR at a shared
+      # path collapses that to a single store.
+      # The .env route does NOT work and was tested: hermes_cli/env_loader.py
+      # loads only $HERMES_HOME/.env, and even keys placed there did not reach
+      # the agent's terminal environment (verified with probe keys in both the
+      # root and profile .env — neither was visible to `printenv`). Compose env
+      # DOES reach it (verified: WIKI_PATH resolves in an agent shell).
+      #
+      # The directory lives under .hermes so it persists in the bind mount;
+      # authenticate ONCE with `gh auth login` and all five bots share it.
+      - GH_CONFIG_DIR=/home/hermeswebui/.hermes/shared/gh
+      - GIT_CONFIG_GLOBAL=/home/hermeswebui/.hermes/shared/git/.gitconfig
+      # Go — ONE shared build/module cache for all five bots.
+      #
+      # Each profile has its own $HOME (…/profiles/<name>/home), so Go's
+      # defaults (GOPATH=$HOME/go, GOCACHE=$HOME/.cache/go-build) would give
+      # every bot a SEPARATE cache: the same dependencies downloaded and
+      # recompiled five times, gigabytes duplicated inside the bind mount.
+      # Same class of fork as the per-profile gh credential stores.
+      #
+      # Compose env, not a .env file: profile/root .env values do NOT reach
+      # the agent's terminal environment (probe-verified), compose env does.
+      #
+      # GOFLAGS=-modcacherw keeps the module cache writable so a later
+      # `go clean -modcache` (or a cache prune) doesn't hit read-only dirs.
+      - GOPATH=/home/hermeswebui/.hermes/shared/go
+      - GOCACHE=/home/hermeswebui/.hermes/shared/go/build-cache
+      - GOMODCACHE=/home/hermeswebui/.hermes/shared/go/pkg/mod
+      - GOFLAGS=-modcacherw
+      # Convenience only — this reaches PID 1 (root), but the agent runs under
+      # `su ... hermeswebui`, which REPLACES PATH with ENV_PATH from
+      # /etc/login.defs. The real fix for bare-"hermes" execs is the
+      # /usr/local/bin/hermes symlink in the Dockerfile. Kept so that
+      # `docker exec -u hermeswebui` is ergonomic.
+      - PATH=/app/venv/bin:/usr/local/bin:/usr/local/sbin:/usr/sbin:/usr/bin:/sbin:/bin
+      - HERMES_WEBUI_PASSWORD=${HERMES_WEBUI_PASSWORD}
+      # Dashboard auth (port 9119). A non-loopback bind inside the container
+      # ALWAYS requires an auth provider — without these the backend fails
+      # closed at startup. The password mirrors the WebUI password by choice.
+      # The SECRET keeps sessions valid across restarts; without it a random
+      # key is minted per boot and every restart logs you out.
+      - HERMES_DASHBOARD_BASIC_AUTH_USERNAME=${HERMES_DASHBOARD_BASIC_AUTH_USERNAME}
+      - HERMES_DASHBOARD_BASIC_AUTH_PASSWORD=${HERMES_DASHBOARD_BASIC_AUTH_PASSWORD}
+      - HERMES_DASHBOARD_BASIC_AUTH_SECRET=${HERMES_DASHBOARD_BASIC_AUTH_SECRET}
+      # Where start-mcu.bash binds the per-profile ACP sockets. Unset = no
+      # relays started (the supervisor no-ops), which is the safe default.
+      - MCU_ACP_SOCKET_DIR=/acp
+      # Which profiles get a gateway + an ACP socket. The profiles must ALREADY
+      # EXIST — `gateway run` refuses an unknown profile ("Profile 'x' does not
+      # exist"), so on a first deploy this is set empty in .env, the bots are
+      # created in Hermes Desktop, and then it is filled in. Unset here falls
+      # back to the five-persona default baked into start-mcu.bash.
+      - MCU_GATEWAY_PROFILES=${MCU_GATEWAY_PROFILES-phil-coulson nick-fury tony-stark daisy-johnson peter-parker}
+      - MCU_GATEWAY_STAGGER_S=${MCU_GATEWAY_STAGGER_S:-8}
+    volumes:
+      # Fresh, dedicated home — NOT the live /home/filip/.hermes.
+      - ${MCU_HERMES_HOME}:/home/hermeswebui/.hermes
+      - ${MCU_WORKSPACE}:/workspace
+      # Wiki (llm-wiki + obsidian skills, both builtin/enabled). Its OWN mount at
+      # /wiki — a sibling of /workspace, not a child. Curated knowledge is a
+      # different lifecycle from agent scratch: /workspace accumulates throwaway
+      # output that gets cleared, the wiki compounds over months.
+      # Shared by all five bots — that is the point: Hindsight banks are
+      # per-profile and isolated, this is deliberately not.
+      - ${MCU_WIKI}:/wiki
+      # ACP IPC: one Unix socket per profile, bound by the socat relays in
+      # start-mcu.bash and connected to by the vscode-ide sidecar. Its OWN
+      # mount rather than a directory inside /workspace, so socket files never
+      # appear in `git status` or in the IDE's Explorer alongside the repos.
+      # Pre-created on the host as uid 1000 mode 700 — Docker would otherwise
+      # create a missing bind-mount target as root (has broken this stack
+      # before), and the socket permissions are the ONLY access control on a
+      # channel that hands out `terminal` + `execute_code`.
+      - ${MCU_ACP_IPC}:/acp
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      hindsight:
+        condition: service_started
+    networks:
+      - hermes-net
+
+  hindsight:
+    image: ghcr.io/vectorize-io/hindsight:latest
+    container_name: hermes_hindsight_sidecar
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:9999:9999"
+    # Deliberately NOT published to the host: internal-only, as designed.
+    # Reachable at http://hindsight:8888 on hermes-net.
+    environment:
+      # OpenAI wire format pointed at Filip's self-hosted Qwen.
+      # Hermes maps openai_compatible -> openai for exactly this case
+      # (plugins/memory/hindsight/__init__.py:605).
+      #- HINDSIGHT_API_LLM_PROVIDER=openai
+      #- HINDSIGHT_API_LLM_BASE_URL=https://api.bamse.cloud/v1
+      #- HINDSIGHT_API_LLM_MODEL=Qwen3.8-27B
+      #- HINDSIGHT_API_LLM_API_KEY=${HERMES_CUSTOM_BAMSE_API_KEY}
+      - HINDSIGHT_API_LLM_PROVIDER=openai-codex
+      - CODEX_HOME=/home/hindsight/.codex
+      - HINDSIGHT_API_WORKER_ID=hindsight-mcu-local
+      #- HINDSIGHT_API_LLM_TIMEOUT_SECONDS=90
+      #- HINDSIGHT_API_LLM_MAX_CONCURRENT=10
+      #- HINDSIGHT_API_LLM_REASONING_EFFORT=none
+      #- HINDSIGHT_API_CONSOLIDATION_LLM_BATCH_SIZE=2
+      #
+      #- HINDSIGHT_API_PREWARM_CACHE=false
+      #- HINDSIGHT_API_LLM_MAX_RETRIES=0
+      # Limits how many total task slots the worker spins up
+      #- HINDSIGHT_API_WORKER_MAX_SLOTS=1
+      # Limits how many slots are dedicated to fact extraction
+      #- HINDSIGHT_API_WORKER_RETAIN_RESERVED_SLOTS=0
+      ## Forces consolidation tasks to utilize only 1 slot max
+      #- HINDSIGHT_API_WORKER_CONSOLIDATION_RESERVED_SLOTS=0
+      #- HINDSIGHT_API_RETAIN_LLM_MAX_CONCURRENT=1
+      #- HINDSIGHT_API_CONSOLIDATION_LLM_MAX_CONCURRENT=1
+      #- HINDSIGHT_API_REFLECT_LLM_MAX_CONCURRENT=1
+      #- HINDSIGHT_API_MODEL_INIT_TIMEOUT=600
+      #- HINDSIGHT_API_STARTUP_WAIT_SECONDS=600
+      #- HINDSIGHT_API_LLM_POOL_SIZE=5
+    volumes:
+      - hindsight-data:/home/hindsight/.pg0
+      - /var/lib/hindsight/codex:/home/hindsight/.codex
+    networks:
+      - hermes-net
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: hermes_cloudflare_tunnel
+    restart: unless-stopped
+    command: tunnel --no-autoupdate run --token ${CLOUDFLARE_TUNNEL_TOKEN}
+    depends_on:
+      - hermes-mcu-core
+    networks:
+      - hermes-net
+
+  vscode-ide:
+    # Browser IDE for reviewing agent file edits. Separate container by
+    # design: an IDE restart or a bad extension must not take down the five
+    # gateways or Photon.
+    build:
+      context: .
+      dockerfile: Dockerfile.ide
+    container_name: hermes_vscode_ide
+    restart: unless-stopped
+    depends_on:
+      - hermes-mcu-core
+    # Forced explicitly. The ACP sockets are mode 0600 owned by uid 1000 and
+    # the bind mounts are uid 1000 — do not rely on the base image's default
+    # user matching.
+    user: "1000:1000"
+    ports:
+      # Loopback publish for direct/SSH access. cloudflared does NOT use this
+      # path: it reaches the IDE over hermes-net as http://vscode-ide:3000,
+      # container-to-container, so the tunnel needs no host port.
+      - "127.0.0.1:8080:3000"
+    # Appended to the entrypoint's argv (ENTRYPOINT + command = one argv).
+    # Interpolated by compose from .env at `up` time, so the secret stays in
+    # .env (mode 600) and never appears in this file.
+    #
+    # WHY A DEDICATED TOKEN AND NOT HERMES_WEBUI_PASSWORD: openvscode-server
+    # validates the token against [0-9a-zA-Z-] only and refuses to start
+    # otherwise ("The connection token '...' does not adhere to the characters
+    # 0-9, a-z, A-Z or -"). The WebUI password contains a space and dots, so
+    # reusing it put the container in a restart loop. MCU_IDE_TOKEN is 32 hex
+    # chars, generated once into .env.
+    #
+    # The IDE is internet-reachable via the tunnel, so put a Cloudflare Access
+    # policy in front of the hostname — this token has no rate limiting, no
+    # lockout and no MFA.
+    # Pass-through for the opt-in settings reseed. Defaults to 0, so an
+    # ordinary `up`/restart never overwrites live settings; run
+    #   IDE_RESEED_SETTINGS=1 docker compose up -d --force-recreate vscode-ide
+    # to force ide/settings.json + mcu.code-workspace back over the volume
+    # copies (a timestamped .bak is kept).
+    environment:
+      - IDE_RESEED_SETTINGS=${IDE_RESEED_SETTINGS:-0}
+    command: --connection-token ${MCU_IDE_TOKEN}
+    volumes:
+      # IDENTICAL paths to hermes_mcu_core. ACP binds the editor's cwd to the
+      # agent task, so /workspace/src/main.go must mean the same file on both
+      # sides or every agent file reference is wrong.
+      - ${MCU_WIKI}:/wiki
+      - ${MCU_WORKSPACE}:/workspace
+      - ${MCU_ACP_IPC}:/acp
+      # IDE state on named volumes: extensions Filip installs himself and his
+      # editor settings survive image rebuilds.
+      - ide-data:/home/openvscode-server/data
+      - ide-extensions:/home/openvscode-server/extensions
+    networks:
+      - hermes-net
+
+volumes:
+  hindsight-data:
+  ide-data:
+  ide-extensions:
+
+networks:
+  hermes-net:
+    driver: bridge

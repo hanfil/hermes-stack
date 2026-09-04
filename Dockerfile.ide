@@ -1,0 +1,129 @@
+# OpenVSCode Server sidecar — browser IDE for reviewing agent file edits.
+#
+# WHY A SEPARATE CONTAINER: the IDE is the most exposed surface in the stack
+# (browser-reachable shell, a repo-scoped GitHub token, and via ACP five agents
+# with terminal + execute_code). Keeping it out of hermes_mcu_core means an IDE
+# restart or a bad extension cannot take down the five gateways or Photon.
+#
+# HOW IT REACHES HERMES: not over the network. `hermes acp` is stdio-only, so
+# the core container runs socat listeners on Unix sockets in the shared /acp
+# bind mount, and this container spawns its own socat to connect. A UDS on a
+# bind mount is the same inode on both sides. No docker.sock, no TCP port.
+#
+# Pinned, not :latest — an IDE that changes silently under a rebuild is a
+# debugging liability.
+#
+# 1.105.1 is the NEWEST TAG GITPOD ACTUALLY PUBLISHES to Docker Hub (verified
+# 2026-09-03; Hub's most recent tags are nightly/insiders/latest/1.105.1).
+# Note the trap: GitHub has releases up to openvscode-server-v1.109.5, but no
+# matching container image was ever pushed for those — pulling 1.109.5 fails
+# with "not found". Check Hub tags, not GitHub releases, before bumping this.
+FROM gitpod/openvscode-server:1.105.1
+
+# socat is the ACP transport (see above). The ACP client extension spawns it
+# as an ordinary local subprocess, which is exactly the stdio model ACP expects.
+USER root
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        socat \
+    && rm -rf /var/lib/apt/lists/*
+USER openvscode-server
+
+# Extensions are installed into a STAGING dir baked into the image. At runtime
+# the live extensions dir is a named volume, and the entrypoint seeds it from
+# here only when it is empty — so extensions Filip installs himself survive
+# every rebuild instead of being clobbered.
+#
+# Both resolve from Open VSX (openvscode-server cannot use the Microsoft
+# Marketplace, which is licensed to MS products only). Verified present there
+# on 2026-09-03:
+#   formulahendry.acp-client  0.2.0            MIT          the ACP panel
+#   eamodio.gitlens           2026.9.31456     free tier    blame + history
+RUN ${OPENVSCODE_SERVER_ROOT}/bin/openvscode-server \
+        --extensions-dir /home/openvscode-server/.ovsc-staging \
+        --install-extension formulahendry.acp-client \
+        --install-extension eamodio.gitlens
+
+# Empty the extension's built-in agent list.
+#
+# THE PROBLEM: acp-client ships ELEVEN default agents (GitHub Copilot, Claude
+# Code, Gemini CLI, ..., and one literally named "Hermes Agent" that runs a
+# bare `hermes` binary, which does not exist in this container by design). They
+# clutter the panel and every one of them fails with `write EPIPE` when clicked.
+#
+# WHY SETTINGS CANNOT FIX IT: the extension lists
+#     Object.keys(workspace.getConfiguration("acp").get("agents", {}))
+# and VS Code DEEP-MERGES a configuration default object with the user value
+# rather than replacing it. Proof from this very deployment: settings.json
+# contains only the five "Hermes — <name>" entries, yet the panel still showed
+# all eleven built-ins. So `ACP: Remove Agent` (which rewrites user settings)
+# cannot durably remove a built-in — it reappears from the default on refresh.
+# Setting a key to null/false does not help either: the KEY still exists, so
+# Object.keys() still lists it, just broken.
+#
+# The only durable lever is the default itself, so this rewrites it to {}.
+# Filip's five agents come from settings.json and are unaffected.
+#
+# Uses the server's bundled node (no python3 in this image) and JSON.parse /
+# JSON.stringify rather than sed, so a malformed edit fails the build instead
+# of shipping a corrupt manifest that breaks extension activation.
+RUN set -eu; \
+    pkg="$(ls -d /home/openvscode-server/.ovsc-staging/formulahendry.acp-client-*/package.json)"; \
+    "${OPENVSCODE_SERVER_ROOT}/node" -e '\
+      const fs = require("fs"); \
+      const p = process.argv[1]; \
+      const m = JSON.parse(fs.readFileSync(p, "utf8")); \
+      let conf = m.contributes.configuration; \
+      if (!Array.isArray(conf)) conf = [conf]; \
+      let n = 0; \
+      for (const c of conf) { \
+        const a = c.properties && c.properties["acp.agents"]; \
+        if (a) { n = Object.keys(a.default || {}).length; a.default = {}; } \
+      } \
+      if (n === 0) { console.error("FAIL: no built-in agents found to strip"); process.exit(1); } \
+      fs.writeFileSync(p, JSON.stringify(m, null, 2)); \
+      const v = JSON.parse(fs.readFileSync(p, "utf8")); \
+      let left = 0; \
+      let cc = v.contributes.configuration; \
+      if (!Array.isArray(cc)) cc = [cc]; \
+      for (const c of cc) { \
+        const a = c.properties && c.properties["acp.agents"]; \
+        if (a) left += Object.keys(a.default || {}).length; \
+      } \
+      if (left !== 0) { console.error("FAIL: defaults survived the rewrite"); process.exit(1); } \
+      console.log("stripped " + n + " built-in ACP agents; default is now {}"); \
+    ' "$pkg"
+
+# Create the mount points that compose backs with named volumes, owned by
+# uid 1000.
+#
+# WHY THIS IS REQUIRED: Docker seeds an empty named volume from the image path
+# it covers — including ownership — but ONLY if that path exists. If it does
+# not, the daemon creates the volume root-owned (0:0), and the server runs as
+# uid 1000 and dies in a restart loop with:
+#   mkdir: cannot create directory '/home/openvscode-server/data/User':
+#   Permission denied
+# Observed on the first boot of this container. Creating them here means the
+# ownership is correct even after `docker compose down -v`, instead of needing
+# a manual chown every time the volumes are recreated.
+RUN mkdir -p /home/openvscode-server/data/User \
+             /home/openvscode-server/extensions
+
+COPY --chown=openvscode-server:openvscode-server \
+     ide/settings.json       /opt/ide-defaults/settings.json
+COPY --chown=openvscode-server:openvscode-server \
+     ide/mcu.code-workspace  /opt/ide-defaults/mcu.code-workspace
+COPY --chown=openvscode-server:openvscode-server \
+     ide/entrypoint.sh       /usr/local/bin/ide-entrypoint.sh
+
+# Build assertions — same discipline as the core image: fail the build loudly
+# rather than shipping an image whose extensions silently did not install.
+USER root
+RUN chmod 0755 /usr/local/bin/ide-entrypoint.sh
+USER openvscode-server
+RUN socat -V | head -1 \
+    && test "$(command -v socat)" = /usr/bin/socat \
+    && ls -d /home/openvscode-server/.ovsc-staging/formulahendry.acp-client-* \
+    && ls -d /home/openvscode-server/.ovsc-staging/eamodio.gitlens-* \
+    && echo "ide extensions staged OK"
+
+ENTRYPOINT ["/usr/local/bin/ide-entrypoint.sh"]

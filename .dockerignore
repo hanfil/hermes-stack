@@ -1,0 +1,27 @@
+# Build context exclusions.
+#
+# WHY THIS EXISTS: without it the context was 651 MB and rising, because the
+# stack's persistent data lives inside this directory. Worse, the live gateway
+# sockets under hermes-home/profiles/*/ made the daemon emit
+#   "Can't add file .../gateway.sock to tar: archive/tar: sockets not supported"
+# on every single build.
+#
+# SAFE BECAUSE: the only things any Dockerfile here COPYs are start-mcu.bash
+# (Dockerfile:144) and ide/ (Dockerfile.ide). Everything below is runtime data
+# or host state that must never be baked into an image.
+
+# Persistent stack data — bind-mounted at runtime, never copied in.
+hermes-home/
+workspace/
+wiki/
+acp-ipc/
+souls/
+
+# Secrets must never enter a build context.
+.env
+*.env
+
+# Local noise.
+.git/
+*.log
+*.md

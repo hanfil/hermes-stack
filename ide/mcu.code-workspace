@@ -1,0 +1,35 @@
+{
+  // ORDER MATTERS — DO NOT PUT wiki FIRST.
+  //
+  // The ACP client extension resolves an agent's working directory as:
+  //     getWorkspaceCwd(){ return workspace.workspaceFolders?.[0]?.uri.fsPath }
+  // It always takes folder [0] and offers no UI to change it. With wiki first,
+  // every agent session started in /wiki and there was no way to switch.
+  //
+  // The extension declares an `acp.defaultWorkingDirectory` setting, but it is
+  // DEAD: the string appears exactly once in dist/extension.js (the schema
+  // declaration) and is never read back via getConfiguration().get(). Folder
+  // order is the only working lever.
+  //
+  // /workspace (the six repos) is where code work happens, so it goes first.
+  // wiki stays fully browsable and editable in the Explorer; only the agents'
+  // default cwd changes.
+  "folders": [
+    { "name": "💻 workspace", "path": "/workspace" },
+    { "name": "📖 wiki", "path": "/wiki" }
+  ],
+  "settings": {
+    "git.autoRepositoryDetection": true,
+    "git.repositoryScanMaxDepth": 1,
+    "git.repositoryScanIgnoredFolders": ["node_modules", ".pytest_cache"],
+    "git.openRepositoryInParentFolders": "always",
+    "files.exclude": {
+      "**/.pytest_cache": true,
+      "**/__pycache__": true
+    },
+    "search.exclude": {
+      "**/.git": true,
+      "**/node_modules": true
+    }
+  }
+}

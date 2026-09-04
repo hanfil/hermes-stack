@@ -1,0 +1,54 @@
+# ---------------------------------------------------------------------------
+# hermes-stack — files that must NEVER reach a public repo, plus local state.
+#
+# RULE OF THUMB: this repo tracks the RECIPE (Dockerfiles, compose, scripts,
+# templates). It does not track SECRETS, DATA, or anything an agent wrote.
+# ---------------------------------------------------------------------------
+
+# --- Secrets ---------------------------------------------------------------
+# The single most important line in this file. .env holds the WebUI password,
+# the Cloudflare tunnel token, dashboard credentials, LLM API keys and the IDE
+# connection token. Committing it is a full compromise of the deployment.
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+*.p12
+credentials.json
+auth.json
+
+# --- Persistent agent state (Filip's data, not source) ---------------------
+# hermes-home is every profile's config, conversation database, memory and
+# credentials — tens of thousands of files and all five bots' private history.
+hermes-home/
+
+# The agents' working checkouts. These are SEPARATE git repos with their own
+# remotes; committing them here would nest repos and leak private code.
+workspace/
+
+# The Obsidian knowledge base. Real notes, not deployment recipe.
+wiki/
+
+# --- Runtime IPC -----------------------------------------------------------
+# Unix domain sockets for the ACP relays. Sockets are not files git can store
+# (`archive/tar: sockets not supported`) and are recreated on every boot.
+acp-ipc/
+*.sock
+
+# --- Backups produced by the IDE reseed ------------------------------------
+*.bak
+*.bak.*
+
+# --- Local editor / OS noise ----------------------------------------------
+.DS_Store
+Thumbs.db
+*.swp
+*~
+.idea/
+.vscode/
+
+# --- Logs and scratch ------------------------------------------------------
+*.log
+logs/
+tmp/
