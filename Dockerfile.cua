@@ -1,39 +1,32 @@
-# Dockerfile.cua — desktop sidecar: linuxserver/webtop + cua-driver MCP daemon
 FROM lscr.io/linuxserver/webtop:ubuntu-xfce
 
 USER root
 
-# Runtime libraries for cua-driver and the loopback-to-hermes-net bridge.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        libxi6 at-spi2-core ca-certificates curl socat \
+        libxi6 at-spi2-core ca-certificates curl socat tar \
     && rm -rf /var/lib/apt/lists/*
 
-ARG PUID=1000
-ARG PGID=1000
-ENV HOME=/config
-USER ${PUID}:${PGID}
+# Install as root into an image-owned path. Not /config: that is the runtime
+# volume, and not writable by an unmapped build-time UID.
+ARG CUA_DRIVER_RS_VERSION=
+ENV CUA_DRIVER_ROOT=/opt/cua
 
-# Install into webtop's persistent user home (/config), which is also the
-# runtime home used by the abc user after LinuxServer's PUID remapping.
-RUN /bin/bash -c "$(curl -fsSL https://cua.ai/driver/install.sh)"
+RUN mkdir -p "${CUA_DRIVER_ROOT}" \
+    && curl -fsSL https://cua.ai/driver/install.sh -o /tmp/install-cua-driver.sh \
+    && HOME="${CUA_DRIVER_ROOT}" bash /tmp/install-cua-driver.sh \
+    && rm /tmp/install-cua-driver.sh \
+    && ln -sf "${CUA_DRIVER_ROOT}/.local/bin/cua-driver" /usr/local/bin/cua-driver \
+    && chmod -R a+rX "${CUA_DRIVER_ROOT}"
 
-# Build-time assertion — fail loudly if the binary or its runtime identity is
-# broken, matching the core Dockerfile's assertion-block convention.
-RUN test "$(id -u)" = "${PUID}" \
-    && test "$(id -g)" = "${PGID}" \
-    && test -x ~/.local/bin/cua-driver \
-    && ~/.local/bin/cua-driver --version \
+# Assertions run as root but check the artifact, not the build identity —
+# PUID/PGID are meaningless until the runtime remap has happened.
+RUN cua-driver --version \
     && test "$(command -v socat)" = /usr/bin/socat
 
-USER root
-
-# s6-overlay only starts services listed in user/contents.d. The service
-# directory plus its base dependency are kept explicit so this remains a
-# normal longrun in the webtop image rather than relying on an illustrative
-# path alone.
 COPY cua-driver-run /etc/s6-overlay/s6-rc.d/svc-cua-driver/run
 RUN chmod +x /etc/s6-overlay/s6-rc.d/svc-cua-driver/run \
+    && printf 'longrun' > /etc/s6-overlay/s6-rc.d/svc-cua-driver/type \
     && mkdir -p /etc/s6-overlay/s6-rc.d/svc-cua-driver/dependencies.d \
         /etc/s6-overlay/s6-rc.d/user/contents.d \
-    && touch /etc/s6-overlay/s6-rc.d/svc-cua-driver/dependencies.d/base \
+    && touch /etc/s6-overlay/s6-rc.d/svc-cua-driver/dependencies.d/svc-de \
     && touch /etc/s6-overlay/s6-rc.d/user/contents.d/svc-cua-driver

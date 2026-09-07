@@ -7,7 +7,7 @@ export DISPLAY=:1
 export CUA_DRIVER_RS_MCP_HTTP_PORT=8766
 : "${CUA_DRIVER_RS_MCP_HTTP_TOKEN:?CUA_DRIVER_RS_MCP_HTTP_TOKEN must be set}"
 
-s6-setuidgid abc /config/.local/bin/cua-driver serve &
+s6-setuidgid abc /usr/local/bin/cua-driver serve &
 driver_pid=$!
 
 # cua-driver intentionally binds HTTP MCP to 127.0.0.1. Keep that listener
