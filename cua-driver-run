@@ -1,0 +1,26 @@
+#!/usr/bin/with-contenv bash
+# Starts cua-driver in the desktop-owning user's session and bridges its
+# loopback-only HTTP MCP listener onto hermes-net.
+set -euo pipefail
+
+export DISPLAY=:1
+export CUA_DRIVER_RS_MCP_HTTP_PORT=8766
+: "${CUA_DRIVER_RS_MCP_HTTP_TOKEN:?CUA_DRIVER_RS_MCP_HTTP_TOKEN must be set}"
+
+s6-setuidgid abc /config/.local/bin/cua-driver serve &
+driver_pid=$!
+
+# cua-driver intentionally binds HTTP MCP to 127.0.0.1. Keep that listener
+# private and expose only this authenticated TCP bridge to hermes-net.
+socat TCP-LISTEN:8765,fork,reuseaddr,bind=0.0.0.0 TCP:127.0.0.1:8766 &
+proxy_pid=$!
+
+cleanup() {
+    kill "$driver_pid" "$proxy_pid" 2>/dev/null || true
+}
+trap cleanup EXIT INT TERM
+
+# Keep the s6 service alive while both halves of the bridge are healthy. If
+# either process exits, let s6 restart the complete pair.
+wait -n "$driver_pid" "$proxy_pid"
+exit $?

@@ -143,6 +143,31 @@ services:
     networks:
       - hermes-net
 
+  desktop:
+    build:
+      context: .
+      dockerfile: Dockerfile.cua
+      args:
+        PUID: ${PUID:-1000}
+        PGID: ${PGID:-1000}
+    container_name: hermes_desktop_sidecar
+    restart: unless-stopped
+    shm_size: "2gb"
+    environment:
+      - PUID=${PUID:-1000}
+      - PGID=${PGID:-1000}
+      - TZ=${TZ:-Etc/UTC}
+      - PASSWORD=${MCU_DESKTOP_PASSWORD}
+      - CUA_DRIVER_RS_MCP_HTTP_TOKEN=${MCU_CUA_DRIVER_MCP_TOKEN}
+    ports:
+      - "127.0.0.1:6080:3000"   # webtop's web desktop UI
+      # cua-driver's MCP bridge is deliberately NOT published to the host —
+      # hermes-mcu-core reaches it only over hermes-net at desktop:8765.
+    volumes:
+      - desktop-home:/config
+    networks:
+      - hermes-net
+
   hindsight:
     image: ghcr.io/vectorize-io/hindsight:latest
     container_name: hermes_hindsight_sidecar
@@ -255,6 +280,7 @@ services:
 
 volumes:
   hindsight-data:
+  desktop-home:
   ide-data:
   ide-extensions:
 
