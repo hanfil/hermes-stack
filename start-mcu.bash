@@ -80,26 +80,30 @@ wait_for_venv() {
   return 1
 }
 
-# Register the desktop sidecar's MCP server in config.yaml if not already present.
+# Register the desktop sidecar's MCP server in every active profile's config.yaml.
 if [ -n "${MCU_CUA_DRIVER_MCP_TOKEN:-}" ]; then
     /app/venv/bin/python3 - <<'PYEOF' || true
-import yaml, shutil
+import yaml, shutil, os
 from pathlib import Path
 
-path = Path("/home/hermeswebui/.hermes/config.yaml")
-if path.parent.is_dir():
-    config = yaml.safe_load(path.read_text()) if path.exists() else {}
-    config = config or {}
+hermes_home = Path("/home/hermeswebui/.hermes")
+profiles = os.environ.get("MCU_GATEWAY_PROFILES", "").split()
+paths = [hermes_home / "config.yaml"]
+paths += [hermes_home / "profiles" / p / "config.yaml" for p in profiles]
+
+for path in paths:
+    if not path.exists():
+        continue
+    config = yaml.safe_load(path.read_text()) or {}
     servers = config.setdefault("mcp_servers", {})
     if "desktop" not in servers:
-        if path.exists():
-            shutil.copy2(path, path.with_suffix(".yaml.bak"))
+        shutil.copy2(path, path.with_suffix(".yaml.bak"))
         servers["desktop"] = {
             "url": "http://desktop:8765/mcp",
             "headers": {"Authorization": "Bearer ${env:MCU_CUA_DRIVER_MCP_TOKEN}"},
         }
         path.write_text(yaml.safe_dump(config, sort_keys=False))
-        print("[start-mcu] registered desktop MCP server in config.yaml")
+        print(f"[start-mcu] registered desktop MCP server in {path}")
 PYEOF
 fi
 
