@@ -115,6 +115,10 @@ services:
       # back to the five-persona default baked into start-mcu.bash.
       - MCU_GATEWAY_PROFILES=${MCU_GATEWAY_PROFILES-phil-coulson nick-fury tony-stark daisy-johnson peter-parker}
       - MCU_GATEWAY_STAGGER_S=${MCU_GATEWAY_STAGGER_S:-8}
+      # The remote MCP entry in hermes-home/config.yaml resolves this value
+      # with ${env:MCU_CUA_DRIVER_MCP_TOKEN}; keep the secret out of the image
+      # and pass it only to the core and desktop services.
+      - MCU_CUA_DRIVER_MCP_TOKEN=${MCU_CUA_DRIVER_MCP_TOKEN}
     volumes:
       # Fresh, dedicated home — NOT the live /home/filip/.hermes.
       - ${MCU_HERMES_HOME}:/home/hermeswebui/.hermes

@@ -55,7 +55,20 @@ The cua-driver MCP bridge listens at `http://desktop:8765/mcp` on `hermes-net`
 and requires the bearer token in `MCU_CUA_DRIVER_MCP_TOKEN`. Connecting the
 five `hermes-mcu-core` agents to that endpoint is a **separate step** in
 Hermes' own `config.yaml`. That file lives in the `hermes-home` bind mount, not
-in this repository; do not add it here.
+in this repository; do not add it here. Add this entry to that file:
+
+```yaml
+mcp_servers:
+  desktop:
+    url: "http://desktop:8765/mcp"
+    headers:
+      Authorization: "Bearer ${env:MCU_CUA_DRIVER_MCP_TOKEN}"
+```
+
+The compose recipe forwards `MCU_CUA_DRIVER_MCP_TOKEN` to `hermes-mcu-core`
+for that environment-variable expansion and to the desktop sidecar for driver
+authentication. Restart the core container after editing `config.yaml` so
+Hermes rediscovers the server.
 
 ### How the IDE talks to the agents
 
