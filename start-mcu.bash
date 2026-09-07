@@ -80,6 +80,29 @@ wait_for_venv() {
   return 1
 }
 
+# Register the desktop sidecar's MCP server in config.yaml if not already present.
+if [ -n "${MCU_CUA_DRIVER_MCP_TOKEN:-}" ]; then
+    /app/venv/bin/python3 - <<'PYEOF' || true
+import yaml, shutil
+from pathlib import Path
+
+path = Path("/home/hermeswebui/.hermes/config.yaml")
+if path.parent.is_dir():
+    config = yaml.safe_load(path.read_text()) if path.exists() else {}
+    config = config or {}
+    servers = config.setdefault("mcp_servers", {})
+    if "desktop" not in servers:
+        if path.exists():
+            shutil.copy2(path, path.with_suffix(".yaml.bak"))
+        servers["desktop"] = {
+            "url": "http://desktop:8765/mcp",
+            "headers": {"Authorization": "Bearer ${env:MCU_CUA_DRIVER_MCP_TOKEN}"},
+        }
+        path.write_text(yaml.safe_dump(config, sort_keys=False))
+        print("[start-mcu] registered desktop MCP server in config.yaml")
+PYEOF
+fi
+
 start_dashboard() {
   # Auth is MANDATORY for a non-loopback bind. --insecure has been a no-op
   # since the June 2026 hardening, so without a provider the dashboard exits
