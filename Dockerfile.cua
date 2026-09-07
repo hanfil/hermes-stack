@@ -1,0 +1,39 @@
+# Dockerfile.cua — desktop sidecar: linuxserver/webtop + cua-driver MCP daemon
+FROM lscr.io/linuxserver/webtop:ubuntu-xfce
+
+USER root
+
+# Runtime libraries for cua-driver and the loopback-to-hermes-net bridge.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        libxi6 at-spi2-core ca-certificates curl socat \
+    && rm -rf /var/lib/apt/lists/*
+
+ARG PUID=1000
+ARG PGID=1000
+ENV HOME=/config
+USER ${PUID}:${PGID}
+
+# Install into webtop's persistent user home (/config), which is also the
+# runtime home used by the abc user after LinuxServer's PUID remapping.
+RUN /bin/bash -c "$(curl -fsSL https://cua.ai/driver/install.sh)"
+
+# Build-time assertion — fail loudly if the binary or its runtime identity is
+# broken, matching the core Dockerfile's assertion-block convention.
+RUN test "$(id -u)" = "${PUID}" \
+    && test "$(id -g)" = "${PGID}" \
+    && test -x ~/.local/bin/cua-driver \
+    && ~/.local/bin/cua-driver --version \
+    && test "$(command -v socat)" = /usr/bin/socat
+
+USER root
+
+# s6-overlay only starts services listed in user/contents.d. The service
+# directory plus its base dependency are kept explicit so this remains a
+# normal longrun in the webtop image rather than relying on an illustrative
+# path alone.
+COPY cua-driver-run /etc/s6-overlay/s6-rc.d/svc-cua-driver/run
+RUN chmod +x /etc/s6-overlay/s6-rc.d/svc-cua-driver/run \
+    && mkdir -p /etc/s6-overlay/s6-rc.d/svc-cua-driver/dependencies.d \
+        /etc/s6-overlay/s6-rc.d/user/contents.d \
+    && touch /etc/s6-overlay/s6-rc.d/svc-cua-driver/dependencies.d/base \
+    && touch /etc/s6-overlay/s6-rc.d/user/contents.d/svc-cua-driver

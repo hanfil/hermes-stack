@@ -30,17 +30,45 @@ deployment.
 
 ## What gets deployed
 
-Four containers on one internal Docker network:
+Five containers on one internal Docker network:
 
 | Service | Container | Ports (host) | Purpose |
 |---|---|---|---|
 | `hermes-mcu-core` | `hermes_mcu_core` | `127.0.0.1:8787` (WebUI), `127.0.0.1:9119` (dashboard backend) | All five agent profiles, their gateways, and the ACP relays |
+| `desktop` | `hermes_desktop_sidecar` | `127.0.0.1:6080` → 3000 | Linux XFCE desktop plus the cua-driver MCP sidecar |
 | `vscode-ide` | `hermes_vscode_ide` | `127.0.0.1:8080` → 3000 | openvscode-server in the browser, with the ACP panel |
 | `hindsight` | `hermes_hindsight_sidecar` | `127.0.0.1:9999` | Long-term memory provider |
 | `cloudflared` | `hermes_cloudflare_tunnel` | — | Optional public ingress |
 
 Every published port binds **127.0.0.1**. Nothing is exposed to the network
 except through the Cloudflare tunnel, which you configure deliberately.
+
+### Desktop sidecar
+
+The optional `desktop` service runs a full Ubuntu XFCE desktop in
+`linuxserver/webtop` and installs `cua-driver`. Open
+`http://localhost:6080` for the human-facing web desktop; it is loopback-only,
+so reach it remotely through an SSH tunnel, Tailscale, or Cloudflare, using the
+same approach as every other loopback-bound service in this repository.
+
+The cua-driver MCP bridge listens at `http://desktop:8765/mcp` on `hermes-net`
+and requires the bearer token in `MCU_CUA_DRIVER_MCP_TOKEN`. Connecting the
+five `hermes-mcu-core` agents to that endpoint is a **separate step** in
+Hermes' own `config.yaml`. That file lives in the `hermes-home` bind mount, not
+in this repository; do not add it here. Add this entry to that file:
+
+```yaml
+mcp_servers:
+  desktop:
+    url: "http://desktop:8765/mcp"
+    headers:
+      Authorization: "Bearer ${env:MCU_CUA_DRIVER_MCP_TOKEN}"
+```
+
+The compose recipe forwards `MCU_CUA_DRIVER_MCP_TOKEN` to `hermes-mcu-core`
+for that environment-variable expansion and to the desktop sidecar for driver
+authentication. Restart the core container after editing `config.yaml` so
+Hermes rediscovers the server.
 
 ### How the IDE talks to the agents
 
@@ -131,7 +159,7 @@ MCU_GATEWAY_PROFILES=""      # empty on a first deploy — bots do not exist yet
 Then:
 
 ```bash
-docker compose build                 # hermes-mcu + vscode-ide images
+docker compose build                 # hermes-mcu, desktop, and vscode-ide images
 docker compose up -d
 ```
 
@@ -148,7 +176,7 @@ Do **not** check for gateways here — there are none yet, by design. What must
 be true at this point:
 
 ```bash
-# All four containers up, core healthy
+# All five containers up, core healthy
 docker ps --format '{{.Names}}\t{{.Status}}'
 
 # The supervisor started and found no profiles to run (expected on a fresh deploy)
@@ -380,13 +408,16 @@ Every variable this deployment reads. Full annotated copy in `.env.example`.
 
 | Variable | Used by | Purpose |
 |---|---|---|
-| `UID` / `GID` | compose, `start-mcu.bash` | Remaps the in-image user (uid 1024) to your host user so bind-mounted files stay host-owned. Wrong values ⇒ permission errors on first boot. |
+| `UID` / `GID` | compose, `start-mcu.bash` | Remaps the in-image Hermes user (uid 1024) to your host user so bind-mounted files stay host-owned. Wrong values ⇒ permission errors on first boot. |
+| `PUID` / `PGID` | compose, `Dockerfile.cua` | Selects the webtop desktop user identity. Keep these aligned with `UID` / `GID` when the sidecar shares host-owned data. |
 | `MCU_HERMES_HOME` | compose | Host path for all persistent agent state: profiles, session DBs, memory, credentials. **Back this up.** |
 | `MCU_WORKSPACE` | compose | Host path for the agents' git checkouts. Mounted at `/workspace` in **both** containers at the same path (ACP requirement). |
 | `MCU_WIKI` | compose | Host path for the Obsidian knowledge base, mounted at `/wiki` in both. |
 | `MCU_ACP_IPC` | compose | Host path holding one Unix socket per profile, mounted at `/acp`. Mode 700. Its own mount so socket files never appear inside a git repo. |
 | `HERMES_WEBUI_PASSWORD` | compose | Login for the WebUI on 8787 — the surface the Cloudflare tunnel fronts. |
 | `MCU_IDE_TOKEN` | compose | openvscode-server connection token. **Charset enforced: `0-9 a-z A-Z -` only.** Without it the entrypoint exits 78 rather than starting unauthenticated. |
+| `MCU_DESKTOP_PASSWORD` | compose | Login for the webtop desktop UI on 6080. |
+| `MCU_CUA_DRIVER_MCP_TOKEN` | compose, cua-driver | 32–4096-character bearer token for the internal cua-driver MCP bridge at `http://desktop:8765/mcp`. Generate with `openssl rand -hex 32`. |
 
 ### Required for Hermes Desktop
 
@@ -514,8 +545,10 @@ gitignored; back them up separately. The images can always be rebuilt.
 
 ```
 ├── Dockerfile              # hermes-mcu core image (agents, gateways, tools)
+├── Dockerfile.cua          # desktop sidecar image (webtop + cua-driver)
+├── cua-driver-run          # s6 service for the authenticated MCP bridge
 ├── Dockerfile.ide          # openvscode-server sidecar
-├── docker-compose.yml      # the four services
+├── docker-compose.yml      # the five services
 ├── start-mcu.bash          # supervisor: dashboard, gateways, sidecars, ACP relays
 ├── mcu-update.bash         # rebuild + restart helper
 ├── ide/
